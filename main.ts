@@ -1,23 +1,21 @@
-import { Plugin, MarkdownRenderer, TFile, MarkdownPostProcessorContext, MarkdownView, parseYaml, requestUrl} from 'obsidian';
-import { EmbedCodeFileSettings, EmbedCodeFileSettingTab, DEFAULT_SETTINGS} from "./settings";
-import { analyseSrcLines, extractSrcLines} from "./utils";
+import { Plugin, MarkdownRenderer, TFile, MarkdownPostProcessorContext, MarkdownView, normalizePath, parseYaml, requestUrl} from 'obsidian';
+import { DEFAULT_SETTINGS,EmbedCodeFileSettings} from "./settings";
+//import { analyseSrcLines, extractSrcLines} from "./utils";
 
 export default class EmbedCodeFile extends Plugin {
 	settings: EmbedCodeFileSettings;
 
 	async onload() {
-		await this.loadSettings();
 
-		this.addSettingTab(new EmbedCodeFileSettingTab(this.app, this));
+		await this.loadSettings()
 
 		this.registerMarkdownPostProcessor((element, context) => {
 			this.addTitle(element, context);
 		});
 
 		// live preview renderers
-		const supportedLanguages = this.settings.includedLanguages.split(",")
+		const supportedLanguages = this.settings.includedLanguages;
 		supportedLanguages.forEach(l => {
-			console.log(`registering renderer for ${l}`)
 			this.registerRenderer(l)
 		});
 	}
@@ -43,57 +41,34 @@ export default class EmbedCodeFile extends Plugin {
 				return
 			}
 
-			let srcPath = metaYaml.PATH
+			let srcPath = metaYaml.path
+
 			if (!srcPath) {
 				await MarkdownRenderer.renderMarkdown("`ERROR: invalid source path`", el, '', this)
 				return
 			}
 
-			if (srcPath.startsWith("https://") || srcPath.startsWith("http://")) {
-				try {
-					let httpResp = await requestUrl({url: srcPath, method: "GET"})
-					fullSrc = httpResp.text
-				} catch(e) {
-					const errMsg = `\`ERROR: could't fetch '${srcPath}'\``
-					await MarkdownRenderer.renderMarkdown(errMsg, el, '', this)
-					return
-				}
-			} else if (srcPath.startsWith("vault://")) {
-				srcPath = srcPath.replace(/^(vault:\/\/)/,'');
-
-				const tFile = app.vault.getAbstractFileByPath(srcPath)
-				if (tFile instanceof TFile) {
-					fullSrc = await app.vault.read(tFile)
-				} else {
-					const errMsg = `\`ERROR: could't read file '${srcPath}'\``
-					await MarkdownRenderer.renderMarkdown(errMsg, el, '', this)
-					return
-				}
-			} else {
-				const errMsg = "`ERROR: invalid source path, use 'vault://...' or 'http[s]://...'`"
-				await MarkdownRenderer.renderMarkdown(errMsg, el, '', this)
+			const activeFile = this.app.workspace.getActiveFile()
+			if (!activeFile || !activeFile.path) {
+				await MarkdownRenderer.renderMarkdown("`ERROR: invalid source path`", el, '', this)
 				return
 			}
 
-			let srcLinesNum: number[] = []
-			const srcLinesNumString = metaYaml.LINES
-			if (srcLinesNumString) {
-				srcLinesNum = analyseSrcLines(srcLinesNumString)
+			let fullPath = this.app.metadataCache.getFirstLinkpathDest(srcPath,  activeFile.path);
+			if(!fullPath) {
+				await MarkdownRenderer.renderMarkdown("`ERROR: invalid source path`", el, '', this)
+				return
 			}
+				
+			fullSrc = await app.vault.read(fullPath)
 
-			if (srcLinesNum.length == 0) {
-				src = fullSrc
-			} else {
-				src = extractSrcLines(fullSrc, srcLinesNum)
-			}
-
-			let title = metaYaml.TITLE
+			let title = metaYaml.title
 			if (!title) {
 				title = srcPath
 			}
+			await MarkdownRenderer.renderMarkdown('```' + lang + '\n' + fullSrc + '\n```', el, '', this)
+			this.addTitleLivePreview(el,title)
 
-			await MarkdownRenderer.renderMarkdown('```' + lang + '\n' + src + '\n```', el, '', this)
-			this.addTitleLivePreview(el, title);
 		});
 	}
 
@@ -148,8 +123,8 @@ export default class EmbedCodeFile extends Plugin {
 		let titleElement = document.createElement("pre");
 		titleElement.appendText(title);
 		titleElement.className = "obsidian-embed-code-file";
-		titleElement.style.color = this.settings.titleFontColor;
-		titleElement.style.backgroundColor = this.settings.titleBackgroundColor;
+		//titleElement.style.color = this.settings.titleFontColor;
+		//titleElement.style.backgroundColor = this.settings.titleBackgroundColor;
 		pre.prepend(titleElement);
 	}
 }
